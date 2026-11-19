@@ -1,0 +1,10 @@
+streamlit>=1.61.1
+beautifulsoup4
+langchain-chroma
+langchain-core
+langchain-openai
+langchain-text-splitters
+openai
+pypdf
+python-dotenv
+requests

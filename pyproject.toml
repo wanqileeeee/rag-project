@@ -1,10 +1,19 @@
 [project]
-name = "blank-app-template"
+name = "bizstart"
 version = "0.1.0"
-description = "A simple Streamlit app template."
+description = "BizStart Singapore business setup RAG assistant."
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
+    "beautifulsoup4",
+    "langchain-chroma",
+    "langchain-core",
+    "langchain-openai",
+    "langchain-text-splitters",
+    "openai",
+    "pypdf",
+    "python-dotenv",
+    "requests",
     "streamlit>=1.61.1",
 ]
 
