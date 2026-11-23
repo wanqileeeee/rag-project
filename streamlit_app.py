@@ -18,6 +18,7 @@ from utils.rag import (
     answer_question,
     build_setup_guide,
     create_retriever,
+    escape_markdown_label,
     generate_chat_title,
     is_openai_configured,
     load_corpus,
@@ -36,16 +37,16 @@ def render_sources(sources: Sequence[SourceCitation]) -> None:
 
     with st.expander("Sources"):
         for source in sources:
-            label = f"[{source.citation_id}]"
-            if source.page is not None:
-                label += f" — page {source.page}"
-            if source.source.startswith(("http://", "https://")):
-                st.markdown(f"{label} — [Official guidance]({source.source})")
+            label = source.label or source.source
+            if source.url:
+                st.markdown(
+                    f"- [{escape_markdown_label(label)}](<{source.url}>)"
+                )
             else:
                 qualifier = (
                     " (user-provided)" if source.kind == "user_upload" else ""
                 )
-                st.text(f"{label} — {source.source}{qualifier}")
+                st.text(f"- {label}{qualifier}")
 
 
 def index_uploaded_files(
@@ -560,11 +561,14 @@ with methodology_tab:
    200-character overlap.
 4. OpenAI text-embedding-3-small creates vector embeddings, and an in-memory
    Chroma collection stores the shared official corpus.
-5. A question or setup profile is embedded through the retriever and the four most
-   relevant chunks are requested.
-6. Retrieved official and chat-uploaded passages are assembled as labelled evidence.
-7. GPT-4o-mini generates a grounded answer or setup guide using only that evidence.
-8. The response is returned with source markers, source names, and PDF page numbers
+5. Chat questions are split into up to four topic queries plus the original question.
+   Setup profiles use five separate topic queries for structure, licences, GST, CPF,
+   and home-based business rules.
+6. Each query uses maximal marginal relevance (MMR) to retrieve up to six chunks
+   from the applicable official and chat-uploaded indexes.
+7. Repeated passages are removed and the remaining evidence is assembled with source labels.
+8. GPT-4o-mini generates a grounded answer or setup guide using only that evidence.
+9. The response is returned with source markers, source names, and PDF page numbers
    where available.
 """
     )
@@ -584,20 +588,21 @@ digraph qa {
     node [shape=box, style="rounded", fontname="Helvetica"];
     input [label="User question"];
     history [label="Last 6 chat messages"];
-    retrieve [label="Retrieve up to 4 chunks\nfrom official + chat indexes"];
+    split [label="LLM creates topic queries"];
+    retrieve [label="MMR: up to 6 chunks\nper query and index"];
     evidence [label="Deduplicate citations\nand build evidence"];
     generate [label="GPT-4o-mini answer"];
     output [label="Answer + source markers"];
-    input -> retrieve;
-    history -> retrieve [label="context for short questions"];
+    input -> split -> retrieve;
+    history -> split [label="context for short questions"];
     retrieve -> evidence -> generate -> output;
 }
 """
     )
     st.markdown(
-        "- Short follow-up questions reuse the previous user question in the retrieval query.\n"
-        "- Official and uploaded retrievers are queried independently, then combined.\n"
-        "- The prompt requires factual claims to be cited and says to report insufficient evidence."
+        "- Short follow-up questions reuse the previous user question when generating retrieval queries.\n"
+        "- The original question and generated topic queries run against official and uploaded indexes.\n"
+        "- The prompt requires cited claims and limits numbers, rates, thresholds, and dates to exact figures in the evidence."
     )
 
     st.subheader("Use case 2: Personalised setup guide")
@@ -611,14 +616,15 @@ digraph guide {
     node [shape=box, style="rounded", fontname="Helvetica"];
     form [label="Business profile form"];
     validate [shape=diamond, label="Activity entered?"];
-    query [label="Build setup retrieval query"];
-    retrieve [label="Retrieve official + chat evidence"];
+    query [label="Build 5 topic queries"];
+    retrieve [label="MMR: up to 6 chunks\nper query and index"];
+    evidence [label="Deduplicate + combine evidence"];
     generate [label="Generate grounded guide"];
     sections [label="Structure, comparison,\nlicences + next steps"];
     form -> validate;
     validate -> query [label="yes"];
     validate -> form [label="no"];
-    query -> retrieve -> generate -> sections;
+    query -> retrieve -> evidence -> generate -> sections;
 }
 """
     )
