@@ -57,6 +57,14 @@ PDF_SOURCE_URLS = {
     "About HDB_URA Home-based Business Scheme.pdf": "https://www.sfa.gov.sg/food-retail/businesses-that-currently-do-not-need-licence-permit/home-based-food-businesses/about-hdb-ura-home-based-business-scheme",
     "Businesses that Need Licence _ Permit for Food Retail.pdf": "https://www.sfa.gov.sg/food-retail/licence-permit/businesses-that-need-licence-permit-for-food-retail",
     "Home-Based Business Scheme_HDB.pdf": "https://www.hdb.gov.sg/managing-my-home/home-ownership/home-business/homebased-business-scheme",
+    "Requirements for Licence _ Permit for Food Retail.pdf": "https://www.sfa.gov.sg/food-retail/licence-permit/requirements-for-licence-permit-for-food-retail",
+    "Application Process & Fees for Licence _ Permit for Food Shops.pdf": "https://www.sfa.gov.sg/food-retail/licence-permit/application-process-fees-for-licence-permit-for-food-retail#food-shop-0",
+    "Application Process & Fees for Licence _ Permit for Food Stall.pdf": "https://www.sfa.gov.sg/food-retail/licence-permit/application-process-fees-for-licence-permit-for-food-retail#food-stall-1",
+    "Application Process & Fees for Licence _ Permit for Supermarket.pdf": "https://www.sfa.gov.sg/food-retail/licence-permit/application-process-fees-for-licence-permit-for-food-retail#supermarket-2",
+    "Application Process & Fees for Licence _ Permit for Temporary Fair.pdf": "https://www.sfa.gov.sg/food-retail/licence-permit/application-process-fees-for-licence-permit-for-food-retail#temporary-fair-3",
+    "Application Process & Fees for Licence _ Permit for Temporary Fair Food Stall.pdf": "https://www.sfa.gov.sg/food-retail/licence-permit/application-process-fees-for-licence-permit-for-food-retail#temporary-fair-food-stall-4",
+    "Home-Based Business Scheme _ Licensing - GoBusiness.pdf": "https://licensing.gobusiness.gov.sg/e-adviser/home-based-business/home-based-business-scheme",
+    "Industry-specific Guidelines _ Licensing - GoBusiness.pdf": "https://licensing.gobusiness.gov.sg/e-adviser/home-based-business/industry-specific-guidelines",
 }
 
 NRIC_PATTERN = re.compile(r"\b[STFGM]\d{7}[A-Z]\b", re.IGNORECASE)
