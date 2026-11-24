@@ -116,6 +116,51 @@ class SourceCitationTests(unittest.TestCase):
         )
         self.assertEqual(link_citations("Unsupported [S9].", sources), "Unsupported.")
 
+    def test_citation_variants_are_merged_and_dollars_escaped(self):
+        sources = [
+            SourceCitation(
+                citation_id="S1",
+                source="https://iras.gov.sg/gst",
+                kind="official",
+                label="GST Registration",
+                url="https://iras.gov.sg/gst",
+            ),
+            SourceCitation(
+                citation_id="S2",
+                source="home-business.pdf",
+                kind="official",
+                label="Home Business Scheme, p.2",
+            ),
+        ]
+        link = "[GST Registration](<https://iras.gov.sg/gst>)"
+
+        self.assertEqual(
+            link_citations("Over S$1 million [S1 | official | IRAS].", sources),
+            rf"Over S\$1 million ({link}).",
+        )
+        self.assertEqual(
+            link_citations("Rules apply ([S1], [S2], [S1]).", sources),
+            f"Rules apply ({link}; *Home Business Scheme, p.2*).",
+        )
+        self.assertEqual(
+            link_citations("Fee [S2](https://sfa.gov.sg/x).", sources),
+            "Fee (*Home Business Scheme, p.2*).",
+        )
+
+    def test_bare_agency_web_title_uses_page_slug(self):
+        document = Document(
+            page_content="GST information",
+            metadata={
+                "source": "https://www.iras.gov.sg/taxes/do-i-need-to-register-for-gst",
+                "title": "IRAS",
+            },
+        )
+
+        self.assertEqual(
+            source_label(document)[0],
+            "IRAS – Do i need to register for gst",
+        )
+
 
 class OfficialPdfTests(unittest.TestCase):
     def test_removed_web_sources_are_not_in_the_official_url_list(self):
@@ -208,7 +253,8 @@ class RetrievalTests(unittest.TestCase):
             0
         ][0].content
         self.assertIn("Only state numbers, rates, thresholds and dates", answer_system_prompt)
-        self.assertIn("Never infer thresholds from the user's inputs.", answer_system_prompt)
+        self.assertIn("Never take a threshold figure from the user's inputs", answer_system_prompt)
+        self.assertIn("correct it explicitly at the start", answer_system_prompt)
         self.assertIn("Can I sell handmade candles from my HDB flat?", answer_system_prompt)
         self.assertIn("Never use facts from the examples", answer_system_prompt)
 
@@ -342,15 +388,19 @@ class RetrievalTests(unittest.TestCase):
             official_retriever=retriever,
         )
 
-        self.assertEqual(len(retriever.queries), 5)
+        self.assertEqual(len(retriever.queries), 6)
         self.assertTrue(any("business structure" in query for query in retriever.queries))
+        self.assertTrue(any("ACRA business registration" in query for query in retriever.queries))
         self.assertTrue(any("licences and permits" in query for query in retriever.queries))
         self.assertTrue(any("GST registration threshold" in query for query in retriever.queries))
         self.assertTrue(any("CPF MediSave" in query for query in retriever.queries))
         self.assertTrue(any("home-based business scheme" in query for query in retriever.queries))
         setup_system_prompt = chat_model.return_value.invoke.call_args.args[0][0].content
         self.assertIn("Only state numbers, rates, thresholds and dates", setup_system_prompt)
-        self.assertIn("Never infer thresholds from the user's inputs.", setup_system_prompt)
+        self.assertIn(
+            "Never take a threshold figure from the user's inputs", setup_system_prompt
+        )
+        self.assertIn("Cite only with bare markers", setup_system_prompt)
         self.assertNotIn("Can I sell handmade candles from my HDB flat?", setup_system_prompt)
 
     @patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"})

@@ -17,7 +17,9 @@ from utils.rag import (
     add_documents_to_retriever,
     answer_question,
     build_setup_guide,
+    NRIC_PATTERN,
     create_retriever,
+    escape_dollars,
     escape_markdown_label,
     generate_chat_title,
     is_openai_configured,
@@ -387,7 +389,10 @@ with qa_tab:
     for message in chat_messages:
         avatar = "✈️" if message["role"] == "assistant" else "👤"
         with st.chat_message(message["role"], avatar=avatar):
-            st.markdown(message["content"])
+            content = message["content"]
+            st.markdown(
+                content if message["role"] == "assistant" else escape_dollars(content)
+            )
             if message.get("attachments"):
                 st.caption("Attached: " + ", ".join(message["attachments"]))
             if message.get("sources"):
@@ -407,6 +412,13 @@ with qa_tab:
         else:
             question = submission.text
             submitted_files = submission.files
+        if question and NRIC_PATTERN.search(question):
+            # Never send NRIC numbers to OpenAI.
+            st.warning(
+                "Please don't share your NRIC or other personal identifiers. "
+                "BizStart doesn't need them. Ask your question without it."
+            )
+            question = None
 
     attachment_names = []
     upload_failed = False
@@ -526,6 +538,8 @@ with guide_tab:
         active_chat.pop("setup_result", None)
         if not activity.strip():
             st.error("Describe your business activity to generate a relevant guide.")
+        elif NRIC_PATTERN.search(activity):
+            st.error("Please remove your NRIC or other personal identifiers.")
         else:
             try:
                 with st.spinner("Finding guidance for your business..."):
