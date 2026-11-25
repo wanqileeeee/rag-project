@@ -67,6 +67,22 @@ PDF_SOURCE_URLS = {
     "Industry-specific Guidelines _ Licensing - GoBusiness.pdf": "https://licensing.gobusiness.gov.sg/e-adviser/home-based-business/industry-specific-guidelines",
 }
 
+# Page titles that only name the agency, mapped to a short display name.
+GENERIC_SITE_TITLES = {
+    "accounting and corporate regulatory authority": "ACRA",
+    "acra": "ACRA",
+    "urban redevelopment authority (ura)": "URA",
+    "urban redevelopment authority": "URA",
+    "ura": "URA",
+    "inland revenue authority of singapore": "IRAS",
+    "iras": "IRAS",
+    "cpf board": "CPF",
+    "central provident fund board": "CPF",
+    "cpf": "CPF",
+    "singapore customs": "Singapore Customs",
+    "gobusiness": "GoBusiness",
+}
+
 NRIC_PATTERN = re.compile(r"\b[STFGM]\d{7}[A-Z]\b", re.IGNORECASE)
 
 CHUNK_SIZE = 1000
@@ -89,6 +105,51 @@ CITATION_INSTRUCTION = (
     "threshold, correct it explicitly at the start and cite the evidence. "
     "Every point under 'Good to know' must either cite a source or say what the "
     "sources do not cover."
+)
+HOME_BUSINESS_INSTRUCTION = (
+    "Home businesses: HDB guidance applies only to HDB flats; for private "
+    "property such as condos or landed homes, use URA guidance. The Home Office "
+    "Scheme and the Home-Based Business Scheme are different schemes with "
+    "different rules: match the user's activity to the scheme the evidence "
+    "describes for it (for example, food preparation falls under home-based "
+    "businesses, not the Home Office Scheme). Never apply one property type's or "
+    "scheme's rules to another; if the evidence for the user's property type or "
+    "scheme is missing, say so. Only list a licence, scheme or regulator that is "
+    "relevant to the user's stated activity."
+)
+# Extra retrieval queries added when a question mentions these topics, so the
+# matching official pages are always searched even if the query splitter misses them.
+TOPIC_QUERIES = (
+    (
+        re.compile(r"\b(condo\w*|landed|private (?:property|home|housing|apartment))\b", re.I),
+        "URA home office scheme and home-based business rules for private residential property",
+    ),
+    (
+        re.compile(r"\bHDB\b", re.I),
+        "HDB home-based business scheme rules for HDB flats",
+    ),
+    (
+        re.compile(
+            r"\b(food|cafe|café|restaurant|bakery|bake\w*|coffee|f&b|hawker|"
+            r"kitchen|catering|drinks?|beverages?|cakes?|pastr\w+)\b",
+            re.I,
+        ),
+        "SFA food shop licence and food retail licence requirements and fees",
+    ),
+    (
+        re.compile(r"\b(import\w*|overseas|customs)\b", re.I),
+        "Singapore Customs import procedures and permits",
+    ),
+)
+# Structure facts are fixed by law, so the comparison table is not left to the LLM.
+STRUCTURE_FACTS_URL = (
+    "https://www.acra.gov.sg/register/business/choosing-business-structure/"
+)
+STRUCTURE_ROWS = (
+    ("Sole proprietorship", "Unlimited (owner personally liable)", "Exactly 1", 1, 1),
+    ("Partnership", "Unlimited (partners personally liable)", "2 to 20", 2, 20),
+    ("Limited liability partnership (LLP)", "Limited", "At least 2", 2, None),
+    ("Private limited company (Pte Ltd)", "Limited", "1 to 50 shareholders", 1, 50),
 )
 FEW_SHOT_EXAMPLES = """
 ### Example 1 — evidence covers the question
@@ -434,7 +495,12 @@ def _chat_retrieval_queries(question: str) -> list[str]:
             break
     if len(queries) == 1:
         raise RAGError("OpenAI returned no usable retrieval queries.")
-    return queries
+    return queries + _topic_queries(question)
+
+
+def _topic_queries(text: str) -> list[str]:
+    """Return the fixed retrieval queries for topics mentioned in the text."""
+    return [query for pattern, query in TOPIC_QUERIES if pattern.search(text)]
 
 
 def _history_messages(history: Sequence[dict[str, Any]]) -> list[Any]:
@@ -473,13 +539,23 @@ def source_label(document: Document) -> tuple[str, str | None]:
             part.strip() for part in str(metadata.get("title") or "").split("|")
         ]
         title = max(title_parts, key=len)
-        if title and len(title) <= 6:
-            # Bare agency titles such as "IRAS" don't identify the page; add its slug.
-            slug = unquote(urlsplit(source).path).rstrip("/").rsplit("/", 1)[-1]
+        agency = GENERIC_SITE_TITLES.get(title.casefold())
+        if title and (agency or len(title) <= 6):
+            # Site-wide titles such as "IRAS" or "Accounting and Corporate
+            # Regulatory Authority" don't identify the page; add its slug.
+            segments = [
+                segment
+                for segment in unquote(urlsplit(source).path).split("/")
+                if segment
+            ]
+            slug = segments[-1] if segments else ""
+            if "-" not in slug and "_" not in slug and len(segments) > 1:
+                # One-word slugs like ".../register/business/" need the parent too.
+                slug = f"{segments[-2]} {slug}"
             slug_title = re.sub(r"[-_]+", " ", slug).strip()
             if slug_title:
                 slug_title = slug_title[0].upper() + slug_title[1:]
-                title = f"{title} – {slug_title}" if title else slug_title
+                title = f"{agency or title} – {slug_title}"
         label = title or source
         candidate_url = source
 
@@ -623,20 +699,19 @@ def _generate(
     if task == "setup":
         instructions = (
             "Create a practical Singapore business setup guide using only the "
-            "retrieved evidence. Use these Markdown headings: '## Suggested "
-            "structure', '## Structure comparison', and '## Licences and next "
-            "steps'. Under the first heading, give evidence-based reasons for a "
-            "suggestion or clearly say that the sources are insufficient to "
-            "recommend one. Under the second, include a comparison table covering "
-            "relevant structures, with columns for liability, owners, administration, "
-            "and suitability where the evidence supports those details. Under the "
-            "third, give a checklist of potentially relevant licences and next "
-            "steps. Cite factual claims with [S1], [S2], etc. Do not invent "
+            "retrieved evidence. Use exactly two Markdown headings: '## Suggested "
+            "structure' and '## Licences and next steps'. Do not write a "
+            "structure comparison table; the app adds one. Under the first "
+            "heading, give evidence-based reasons for a suggestion that fits the "
+            "number of owners (a sole proprietorship has exactly 1 owner; a "
+            "partnership or LLP needs at least 2), or clearly say that the "
+            "sources are insufficient to recommend one. Under the second, give a "
+            "checklist of licences and next steps relevant to this business. Only "
+            "include steps that apply to the recommended structure (for example, "
+            "MediSave rules for self-employed persons do not apply to a Pte Ltd). "
+            "Cite factual claims with [S1], [S2], etc. Do not invent "
             "requirements, thresholds, or advantages absent from the sources. "
-            "The comparison table must always include four rows: Sole "
-            "proprietorship (exactly 1 owner), Partnership, Limited liability "
-            "partnership, and Private limited company; write 'Not stated in "
-            "sources' in any cell the evidence does not support. End every "
+            f"{HOME_BUSINESS_INSTRUCTION} End every "
             "checklist item with a citation, or with '(not covered by sources — "
             "confirm with the agency)'. Compare the user's revenue band with any "
             "threshold in the evidence and say plainly whether the requirement "
@@ -661,7 +736,8 @@ def _generate(
             "helpful, and finish with 'Good to know' for gaps or caveats. If "
             "something is not allowed, explain an evidence-supported alternative. "
             "If the evidence does not answer the question at all, say so briefly. "
-            "Do not add general advice without a citation. The examples below show "
+            "Do not add general advice without a citation. "
+            f"{HOME_BUSINESS_INSTRUCTION} The examples below show "
             "format and behavior only; their evidence is fictional. Never use facts "
             "from the examples in your answers.\n\n"
             f"{FEW_SHOT_EXAMPLES}\n"
@@ -743,10 +819,58 @@ def build_setup_guide(
         retrieval_queries.append(
             "Singapore online seller registration and importing goods"
         )
-    return _generate(
+    for query in _topic_queries(activity):
+        if query not in retrieval_queries:
+            retrieval_queries.append(query)
+    result = _generate(
         request,
         official_retriever=official_retriever,
         upload_retriever=upload_retriever,
         task="setup",
         retrieval_queries=retrieval_queries,
     )
+    return RAGResponse(
+        answer=_insert_structure_table(result.answer, owner_count),
+        sources=result.sources,
+    )
+
+
+def structure_comparison_table(owner_count: str) -> str:
+    """Return the fixed ACRA structure comparison for the given owner count."""
+    owners = 3 if owner_count.startswith("3") else int(owner_count or 1)
+    lines = [
+        "## Structure comparison",
+        "",
+        "| Structure | Owner liability | Number of owners | Fits "
+        f"{owner_count} owner{'s' if owners > 1 else ''}? |",
+        "| --- | --- | --- | --- |",
+    ]
+    for name, liability, owner_text, minimum, maximum in STRUCTURE_ROWS:
+        fits = owners >= minimum and (maximum is None or owners <= maximum)
+        lines.append(
+            f"| {name} | {liability} | {owner_text} | {'Yes' if fits else 'No'} |"
+        )
+    lines += [
+        "",
+        f"Source: [ACRA – Choosing a business structure](<{STRUCTURE_FACTS_URL}>)",
+    ]
+    return "\n".join(lines)
+
+
+def _insert_structure_table(answer: str, owner_count: str) -> str:
+    # Drop any table the model wrote anyway, then place the fixed table before
+    # the licences section (or at the end if that heading is missing).
+    answer = re.sub(
+        r"\n*#+\s*Structure comparison.*?(?=\n#+\s|\Z)",
+        "\n",
+        answer,
+        flags=re.S | re.I,
+    )
+    table = structure_comparison_table(owner_count)
+    heading = re.search(r"^#+\s*Licences and next steps", answer, flags=re.M | re.I)
+    if heading:
+        return (
+            f"{answer[: heading.start()].rstrip()}\n\n{table}\n\n"
+            f"{answer[heading.start():]}"
+        )
+    return f"{answer.rstrip()}\n\n{table}"

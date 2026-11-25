@@ -13,6 +13,7 @@ from utils.rag import (
     SourceCitation,
     _collect_evidence,
     _retrieval_query,
+    _topic_queries,
     answer_question,
     build_setup_guide,
     create_retriever,
@@ -22,6 +23,7 @@ from utils.rag import (
     load_uploaded_document,
     link_citations,
     source_label,
+    structure_comparison_table,
 )
 
 
@@ -388,7 +390,9 @@ class RetrievalTests(unittest.TestCase):
             official_retriever=retriever,
         )
 
-        self.assertEqual(len(retriever.queries), 6)
+        # 5 core topics + home-based scheme + food licence ("bakery").
+        self.assertEqual(len(retriever.queries), 7)
+        self.assertTrue(any("SFA food shop licence" in query for query in retriever.queries))
         self.assertTrue(any("business structure" in query for query in retriever.queries))
         self.assertTrue(any("ACRA business registration" in query for query in retriever.queries))
         self.assertTrue(any("licences and permits" in query for query in retriever.queries))
@@ -402,6 +406,85 @@ class RetrievalTests(unittest.TestCase):
         )
         self.assertIn("Cite only with bare markers", setup_system_prompt)
         self.assertNotIn("Can I sell handmade candles from my HDB flat?", setup_system_prompt)
+        self.assertIn("HDB guidance applies only to HDB flats", setup_system_prompt)
+
+    @patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"})
+    @patch("utils.rag.ChatOpenAI")
+    def test_setup_guide_uses_fixed_structure_table(self, chat_model):
+        chat_model.return_value.invoke.return_value = SimpleNamespace(
+            content=(
+                "## Suggested structure\nA Pte Ltd fits [S1].\n\n"
+                "## Structure comparison\n| LLP | 2 to 20 |\n\n"
+                "## Licences and next steps\n- Register with ACRA [S1]."
+            )
+        )
+        retriever = StaticRetriever(
+            [
+                Document(
+                    page_content="Official business setup evidence",
+                    metadata={"source": "https://example.gov.sg/business"},
+                )
+            ]
+        )
+
+        result = build_setup_guide(
+            activity="online bag shop",
+            owner_count="2",
+            premises="Online only",
+            revenue="Below S$100,000",
+            official_retriever=retriever,
+        )
+
+        self.assertNotIn("| LLP | 2 to 20 |", result.answer)
+        self.assertEqual(result.answer.count("## Structure comparison"), 1)
+        self.assertLess(
+            result.answer.index("## Structure comparison"),
+            result.answer.index("## Licences and next steps"),
+        )
+        self.assertIn("| Sole proprietorship | Unlimited", result.answer)
+        self.assertIn("| Exactly 1 | No |", result.answer)
+        self.assertIn("| At least 2 | Yes |", result.answer)
+        self.assertIn("choosing-business-structure", result.answer)
+
+    def test_structure_table_marks_fit_for_one_owner(self):
+        table = structure_comparison_table("1")
+        self.assertIn("| Exactly 1 | Yes |", table)
+        self.assertIn("| 2 to 20 | No |", table)
+        self.assertIn("| At least 2 | No |", table)
+        self.assertIn("| 1 to 50 shareholders | Yes |", table)
+        self.assertIn("| At least 2 | Yes |", structure_comparison_table("3 or more"))
+
+    def test_topic_queries_cover_condo_food_and_imports(self):
+        self.assertTrue(
+            any("URA" in query for query in _topic_queries("Consulting from my condo?"))
+        )
+        self.assertTrue(
+            any("SFA food shop" in query for query in _topic_queries("Open a cafe"))
+        )
+        self.assertTrue(
+            any("Customs" in query for query in _topic_queries("I import bags"))
+        )
+        self.assertEqual(_topic_queries("What is GST?"), [])
+
+    def test_generic_agency_title_uses_short_name_and_slug(self):
+        document = Document(
+            page_content="ACRA",
+            metadata={
+                "source": "https://www.acra.gov.sg/register/business/choosing-business-structure/",
+                "title": "Accounting and Corporate Regulatory Authority",
+            },
+        )
+        self.assertEqual(
+            source_label(document)[0], "ACRA – Choosing business structure"
+        )
+        root = Document(
+            page_content="ACRA",
+            metadata={
+                "source": "https://www.acra.gov.sg/register/business/",
+                "title": "Accounting and Corporate Regulatory Authority",
+            },
+        )
+        self.assertEqual(source_label(root)[0], "ACRA – Register business")
 
     @patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"})
     @patch("utils.rag.ChatOpenAI")
